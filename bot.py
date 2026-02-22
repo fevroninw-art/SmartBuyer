@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
@@ -15,8 +15,10 @@ api = FastAPI()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает 🚀")
-
-
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (update.message.text or "").strip()
+    await update.message.reply_text(f"Понял: {text}")
+tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 tg_app.add_handler(CommandHandler("start", start))
 
 
