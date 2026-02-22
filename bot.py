@@ -11,7 +11,13 @@ if not BOT_TOKEN:
 
 tg_app = Application.builder().token(BOT_TOKEN).build()
 api = FastAPI()
-
+def search_products(query: str):
+    # Временная заглушка. Потом заменим на парсинг/API.
+    return [
+        {"title": f"{query} (вариант 1)", "price": 79990, "url": "https://example.com/1"},
+        {"title": f"{query} (вариант 2)", "price": 82990, "url": "https://example.com/2"},
+        {"title": f"{query} (вариант 3)", "price": 85990, "url": "https://example.com/3"},
+    ]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает 🚀")
@@ -24,7 +30,11 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not query:
             await update.message.reply_text("Напиши так: найди iPhone 15")
             return
-        await update.message.reply_text(f"Ок. Ищу: {query}")
+items = search_products(query)
+best = min(items, key=lambda x: x["price"])
+await update.message.reply_text(
+    f"Нашёл лучшее:\n{best['title']}\nЦена: {best['price']} ₽\nСсылка: {best['url']}"
+)
 
     elif low.startswith("следи"):
         query = text[5:].strip()
