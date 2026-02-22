@@ -17,7 +17,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает 🚀")
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
-    await update.message.reply_text(f"Понял: {text}")
+    low = text.lower()
+
+    if low.startswith("найди"):
+        query = text[5:].strip()
+        if not query:
+            await update.message.reply_text("Напиши так: найди iPhone 15")
+            return
+        await update.message.reply_text(f"Ок. Ищу: {query}")
+
+    elif low.startswith("следи"):
+        query = text[5:].strip()
+        if not query:
+            await update.message.reply_text("Напиши так: следи iPhone 15 до 85к")
+            return
+        await update.message.reply_text(f"Ок. Буду следить за: {query}")
+
+    else:
+        await update.message.reply_text("Я понимаю:\n1) найди ...\n2) следи ...")
 tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 tg_app.add_handler(CommandHandler("start", start))
 
