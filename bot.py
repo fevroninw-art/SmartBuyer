@@ -1,4 +1,5 @@
 import os
+import re
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -11,7 +12,8 @@ if not BOT_TOKEN:
 
 tg_app = Application.builder().token(BOT_TOKEN).build()
 api = FastAPI()
-# Хранилище отслеживаний
+
+# Хранилище отслеживаний (в памяти). После перезапуска Render очистится.
 # структура:
 # {
 #   user_id: [
@@ -19,7 +21,8 @@ api = FastAPI()
 #       {"query": "ps5", "limit": 50000}
 #   ]
 # }
-tracked_items = {}
+tracked_items: dict[int, list[dict]] = {}
+
 
 def search_products(query: str):
     # Временная заглушка. Потом заменим на парсинг/API.
@@ -31,7 +34,41 @@ def search_products(query: str):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот работает 🚀\nНапиши: найди iPhone 15")
+    await update.message.reply_text(
+        "Бот работает 🚀\n"
+        "Команды:\n"
+        "• найди iPhone 15\n"
+        "• следи айфон до 80000\n"
+        "• (после 'найди') можно прислать номер 1/2/3"
+    )
+
+
+def _parse_follow_command(text: str):
+    """
+    Принимает строку после слова 'следи', например:
+      'айфон до 80000'
+      'iPhone 15 85000'
+    Возвращает (query, limit) или (None, None) если не распарсилось.
+    """
+    s = text.strip()
+    if not s:
+        return None, None
+
+    nums = re.findall(r"\d+", s)
+    if not nums:
+        return None, None
+
+    limit = int(nums[-1])
+
+    # Убираем числа, слово "до" и лишние пробелы
+    query = re.sub(r"\d+", " ", s)
+    query = re.sub(r"\bдо\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\s+", " ", query).strip()
+
+    if not query:
+        return None, None
+
+    return query, limit
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,7 +89,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         item = items[idx]
         await update.message.reply_text(
-            f"Выбрано: {item['title']}\nЦена: {item['price']} ₽\nСсылка: {item['url']}"
+            f"Выбрано: {item['title']}\n"
+            f"Цена: {item['price']} ₽\n"
+            f"Ссылка: {item['url']}"
         )
         return
 
@@ -75,39 +114,31 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 3) Команда "следи ..."
-elif low.startswith("следи"):
-    user_id = update.effective_user.id
-    query_text = text[5:].strip()
+    if low.startswith("следи"):
+        user_id = update.effective_user.id
+        payload = text[5:].strip()
 
-    if not query_text:
-        await update.message.reply_text("Напиши так: следи айфон до 80000")
+        query, limit = _parse_follow_command(payload)
+        if query is None or limit is None:
+            await update.message.reply_text("Напиши так: следи айфон до 80000")
+            return
+
+        tracked_items.setdefault(user_id, []).append({"query": query, "limit": limit})
+
+        await update.message.reply_text(
+            f"Добавил отслеживание:\n"
+            f"Товар: {query}\n"
+            f"Лимит: {limit} ₽"
+        )
         return
 
-    import re
-    numbers = re.findall(r"\d+", query_text)
-
-    if not numbers:
-        await update.message.reply_text("Укажи лимит цены, например: следи айфон до 80000")
-        return
-
-    limit = int(numbers[-1])
-    query = re.sub(r"\d+", "", query_text).replace("до", "").strip()
-
-    if user_id not in tracked_items:
-        tracked_items[user_id] = []
-
-    tracked_items[user_id].append({
-        "query": query,
-        "limit": limit
-    })
-
+    # 4) Всё остальное
     await update.message.reply_text(
-        f"Добавил отслеживание:\nТовар: {query}\nЛимит: {limit} ₽"
+        "Я понимаю:\n"
+        "1) найди ...\n"
+        "2) следи ... до <цена>\n"
+        "3) номер (после найди)"
     )
-    return
-# 4) Всё остальное
-    else:
-        await update.message.reply_text("Я понимаю:\n1) найди ...\n2) следи ...\n3) номер (после найди)")
 
 
 # Важно: хендлеры добавляем до запуска приложения
@@ -117,11 +148,10 @@ tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
 @api.on_event("startup")
 async def on_startup():
-    # Инициализация PTB приложения
     await tg_app.initialize()
     await tg_app.start()
 
-    # Render даст публичный URL сервиса. Его положим в WEBHOOK_URL (например: https://xxx.onrender.com/webhook)
+    # WEBHOOK_URL должен быть вида: https://<твой-сервис>.onrender.com/webhook
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
         print("WARNING: WEBHOOK_URL is not set, webhook will not be registered")
@@ -143,7 +173,6 @@ async def on_shutdown():
 
 @api.post("/webhook")
 async def telegram_webhook(request: Request):
-    # Проверка секрета (Telegram шлёт заголовок, если указан secret_token)
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=401, detail="Invalid secret token")
