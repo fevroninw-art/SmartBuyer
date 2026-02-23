@@ -39,7 +39,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message += "\nНапиши номер, чтобы выбрать."
         await update.message.reply_text(message)
         return
-elif low.startswith("следи"):
+    elif low.startswith("следи"):
         query = text[5:].strip()
         if not query:
             await update.message.reply_text("Напиши так: следи iPhone 15 до 85к")
