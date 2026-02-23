@@ -39,14 +39,14 @@ for i, item in enumerate(items, start=1):
 message += "\nНапиши номер, чтобы выбрать."
 await update.message.reply_text(message)
 
-    elif low.startswith("следи"):
+elif low.startswith("следи"):
         query = text[5:].strip()
         if not query:
             await update.message.reply_text("Напиши так: следи iPhone 15 до 85к")
             return
         await update.message.reply_text(f"Ок. Буду следить за: {query}")
 # test preview
-    else:
+else:
         await update.message.reply_text("Я понимаю:\n1) найди ...\n2) следи ...")
 tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 tg_app.add_handler(CommandHandler("start", start))
