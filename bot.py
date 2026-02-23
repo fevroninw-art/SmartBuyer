@@ -32,7 +32,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Напиши так: следи iPhone 15 до 85к")
             return
         await update.message.reply_text(f"Ок. Буду следить за: {query}")
-
+# test preview
     else:
         await update.message.reply_text("Я понимаю:\n1) найди ...\n2) следи ...")
 tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
