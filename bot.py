@@ -12,13 +12,14 @@ from telegram.ext import (
 )
 
 from parser import parse_follow
+from sources import fetch_offers   # ← ВАЖНО
 
 
 # ---- ENV ----
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # например: https://xxx.onrender.com/webhook
-CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "90"))  # 60-120 норм, по умолчанию 90
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "90"))
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
@@ -29,31 +30,24 @@ tg_app = Application.builder().token(BOT_TOKEN).build()
 api = FastAPI()
 
 
-# ---- STORAGE (in-memory) ----
-# tracked_items = { user_id: [ {"query": str, "limit": int}, ... ] }
+# ---- STORAGE ----
 tracked_items: dict[int, list[dict]] = {}
-
-# чтобы не спамить: уведомили по (user_id, query_lower, limit)
 notified: set[tuple[int, str, int]] = set()
 
 checker_task: asyncio.Task | None = None
 
 
-# ---- SEARCH (stub) ----
+# ---- SEARCH ----
 def search_products(query: str):
-    # Заглушка. Потом сюда подключим OpenClaw / реальные магазины.
-    return [
-        {"title": f"{query} (вариант 1)", "price": 79990, "url": "https://example.com/1"},
-        {"title": f"{query} (вариант 2)", "price": 82990, "url": "https://example.com/2"},
-        {"title": f"{query} (вариант 3)", "price": 85990, "url": "https://example.com/3"},
-    ]
+    # теперь тянем из sources.py
+    return fetch_offers(query)
 
 
 def get_best_offer(query: str) -> dict | None:
     items = search_products(query)
     if not items:
         return None
-    return min(items, key=lambda x: x.get("price", 10**18))
+    return min(items, key=lambda x: int(x.get("price", 10**18)))
 
 
 # ---- COMMANDS ----
@@ -74,7 +68,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     items = tracked_items.get(user_id, [])
 
     if not items:
-        await update.message.reply_text("У тебя пока нет отслеживаний. Пример: следи айфон до 90000")
+        await update.message.reply_text("У тебя пока нет отслеживаний.")
         return
 
     msg = "Твои отслеживания:\n\n"
@@ -89,7 +83,7 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     items = tracked_items.get(user_id, [])
 
     if not items:
-        await update.message.reply_text("Нечего удалять — отслеживаний нет. /list")
+        await update.message.reply_text("Нечего удалять.")
         return
 
     if not context.args or not context.args[0].isdigit():
@@ -104,7 +98,6 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     removed = items.pop(idx)
     tracked_items[user_id] = items
 
-    # почистим notified по этому правилу
     notified.discard((user_id, removed["query"].lower(), int(removed["limit"])))
 
     await update.message.reply_text(f"Удалил ✅\n{removed['query']} — лимит {removed['limit']} ₽")
@@ -116,7 +109,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     low = text.lower()
     user_id = update.effective_user.id
 
-    # 1) выбор по номеру после "найди"
+    # выбор по номеру
     if text.isdigit():
         items = context.user_data.get("last_items")
         if not items:
@@ -136,7 +129,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 2) "найди ..."
+    # найди
     if low.startswith("найди"):
         query = text[5:].strip()
         if not query:
@@ -144,30 +137,35 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         items = search_products(query)
+        if not items:
+            await update.message.reply_text("Ничего не нашёл.")
+            return
+
         context.user_data["last_items"] = items
 
         msg = "Нашёл:\n\n"
-        for i, item in enumerate(items, start=1):
+        for i, item in enumerate(items[:10], start=1):
             msg += f"{i}. {item['title']} — {item['price']} ₽\n"
-        msg += "\nНапиши номер (1/2/3), чтобы выбрать."
+        msg += "\nНапиши номер, чтобы выбрать."
         await update.message.reply_text(msg)
         return
 
-    # 3) "следи ..."
+    # следи
     if low.startswith("следи"):
-        tail = text[5:].strip()  # всё после "следи"
+        tail = text[5:].strip()
         parsed = parse_follow(tail)
         if not parsed:
             await update.message.reply_text("Напиши так: следи айфон до 90000")
             return
 
         query, limit = parsed
+        limit = int(limit)
 
-        tracked_items.setdefault(user_id, []).append({"query": query, "limit": int(limit)})
-        notified.discard((user_id, query.lower(), int(limit)))
+        tracked_items.setdefault(user_id, []).append({"query": query, "limit": limit})
+        notified.discard((user_id, query.lower(), limit))
 
         await update.message.reply_text(
-            "Добавил отслеживание ✅\n"
+            f"Добавил отслеживание ✅\n"
             f"Товар: {query}\n"
             f"Лимит: {limit} ₽\n"
             f"Проверяю каждые {CHECK_INTERVAL} сек.\n"
@@ -175,13 +173,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text(
-        "Я понимаю:\n"
-        "• найди iPhone 15\n"
-        "• следи айфон до 90000\n"
-        "• /list\n"
-        "• /stop 1"
-    )
+    await update.message.reply_text("Я понимаю: найди / следи /list /stop")
 
 
 # ---- BACKGROUND CHECKER ----
@@ -192,7 +184,7 @@ async def checker_loop():
 
             for uid, items in snapshot.items():
                 for it in items:
-                    query = str(it["query"])
+                    query = it["query"]
                     limit = int(it["limit"])
                     key = (uid, query.lower(), limit)
 
@@ -244,13 +236,9 @@ async def on_startup():
             secret_token=WEBHOOK_SECRET,
             drop_pending_updates=True,
         )
-        print(f"Webhook set to: {WEBHOOK_URL}")
-    else:
-        print("WARNING: WEBHOOK_URL is not set, webhook will not be registered")
 
     if checker_task is None:
         checker_task = asyncio.create_task(checker_loop())
-        print(f"Checker started. Interval={CHECK_INTERVAL}s")
 
 
 @api.on_event("shutdown")
