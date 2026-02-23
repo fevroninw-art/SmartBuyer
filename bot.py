@@ -10,7 +10,7 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # например: https://xxx.onrender.com/webhook
 
 # как часто проверять (в секундах). поставь 300 = 5 минут
-CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "300"))
+CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "20"))
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
