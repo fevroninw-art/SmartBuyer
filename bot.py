@@ -11,7 +11,15 @@ if not BOT_TOKEN:
 
 tg_app = Application.builder().token(BOT_TOKEN).build()
 api = FastAPI()
-
+# Хранилище отслеживаний
+# структура:
+# {
+#   user_id: [
+#       {"query": "айфон", "limit": 80000},
+#       {"query": "ps5", "limit": 50000}
+#   ]
+# }
+tracked_items = {}
 
 def search_products(query: str):
     # Временная заглушка. Потом заменим на парсинг/API.
@@ -67,15 +75,37 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 3) Команда "следи ..."
-    elif low.startswith("следи"):
-        query = text[5:].strip()
-        if not query:
-            await update.message.reply_text("Напиши так: следи iPhone 15 до 85к")
-            return
-        await update.message.reply_text(f"Ок. Буду следить за: {query}")
+elif low.startswith("следи"):
+    user_id = update.effective_user.id
+    query_text = text[5:].strip()
+
+    if not query_text:
+        await update.message.reply_text("Напиши так: следи айфон до 80000")
         return
 
-    # 4) Всё остальное
+    import re
+    numbers = re.findall(r"\d+", query_text)
+
+    if not numbers:
+        await update.message.reply_text("Укажи лимит цены, например: следи айфон до 80000")
+        return
+
+    limit = int(numbers[-1])
+    query = re.sub(r"\d+", "", query_text).replace("до", "").strip()
+
+    if user_id not in tracked_items:
+        tracked_items[user_id] = []
+
+    tracked_items[user_id].append({
+        "query": query,
+        "limit": limit
+    })
+
+    await update.message.reply_text(
+        f"Добавил отслеживание:\nТовар: {query}\nЛимит: {limit} ₽"
+    )
+    return
+# 4) Всё остальное
     else:
         await update.message.reply_text("Я понимаю:\n1) найди ...\n2) следи ...\n3) номер (после найди)")
 
