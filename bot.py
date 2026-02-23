@@ -30,7 +30,14 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not query:
             await update.message.reply_text("Напиши так: найди iPhone 15")
             return
-        await update.message.reply_text(f"Ок. Ищу: {query}")
+        items = search_products(query)
+
+message = "Нашёл:\n\n"
+for i, item in enumerate(items, start=1):
+    message += f"{i}. {item['title']} — {item['price']} ₽\n"
+
+message += "\nНапиши номер, чтобы выбрать."
+await update.message.reply_text(message)
 
     elif low.startswith("следи"):
         query = text[5:].strip()
