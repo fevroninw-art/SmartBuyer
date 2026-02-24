@@ -1,7 +1,6 @@
 # sources.py
-from __future__ import annotations
 
-from typing import List, Dict, Optional
+from typing import List, Dict
 from urllib.parse import quote_plus
 
 import httpx
@@ -22,8 +21,7 @@ def fetch_stub(query: str) -> List[Dict]:
     ]
 
 
-async def _fetch_avito_html(query: str, timeout_s: float = 15.0) -> str:
-    # Простой поиск по Avito (HTML). Без парсинга пока — шаг 1: убедиться, что запрос/ответ работает.
+def fetch_avito(query: str) -> List[Dict]:
     q = quote_plus(query)
     url = f"https://www.avito.ru/all?q={q}"
 
@@ -32,60 +30,31 @@ async def _fetch_avito_html(query: str, timeout_s: float = 15.0) -> str:
         "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
     }
 
-    async with httpx.AsyncClient(headers=headers, timeout=timeout_s, follow_redirects=True) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.text
-
-
-def fetch_avito(query: str, max_items: int = 10) -> List[Dict]:
-    """
-    Шаг 1: НЕ парсим предложения, только проверяем что Avito отдаёт страницу.
-    Возвращаем один "технический" оффер, чтобы увидеть в Телеграме, что источник работает.
-    """
     try:
-        html = asyncio_run(_fetch_avito_html(query))
-        # маленький маркер, что html действительно пришёл
-        size = len(html)
+        r = httpx.get(url, headers=headers, timeout=15.0)
+        r.raise_for_status()
+        size = len(r.text)
+
         return [{
             "title": f"[avito] страница получена ({size} bytes)",
             "price": 10**18,
-            "url": f"https://www.avito.ru/all?q={quote_plus(query)}",
+            "url": url,
             "source": "avito",
         }]
+
     except Exception as e:
         return [{
             "title": f"[avito] ошибка: {type(e).__name__}",
             "price": 10**18,
-            "url": f"https://www.avito.ru/all?q={quote_plus(query)}",
+            "url": url,
             "source": "avito",
         }]
 
 
-def fetch_offers(query: str, max_items: int = 10) -> List[Dict]:
-    """
-    Единая точка: собираем офферы из источников.
-    Пока: stub + проверка доступности Avito (без парсинга).
-    """
+def fetch_offers(query: str) -> List[Dict]:
     offers: List[Dict] = []
+
     offers.extend(fetch_stub(query))
-    offers.extend(fetch_avito(query, max_items=max_items))
-    return offers[:max_items]
+    offers.extend(fetch_avito(query))
 
-
-# --- маленький хелпер для запуска async из sync ---
-def asyncio_run(coro):
-    import asyncio
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    # если мы уже внутри event loop (на Render/uvicorn такое возможно),
-    # делаем новый loop в отдельном потоке — но это уже усложнение.
-    # Для простоты: если loop есть — просто кидаем исключение с понятным текстом.
-    if loop and loop.is_running():
-        raise RuntimeError("asyncio_run called inside running event loop")
-
-    return asyncio.run(coro)
+    return offers
