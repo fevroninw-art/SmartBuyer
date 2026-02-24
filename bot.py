@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 from parser import parse_follow
-from sources import fetch_offers   # ← ВАЖНО
+from sources import fetch_offers  # важно
 
 
 # ---- ENV ----
@@ -33,18 +33,66 @@ api = FastAPI()
 # ---- STORAGE ----
 tracked_items: dict[int, list[dict]] = {}
 notified: set[tuple[int, str, int]] = set()
-
 checker_task: asyncio.Task | None = None
 
 
-# ---- SEARCH ----
-def search_products(query: str):
-    # теперь тянем из sources.py
+# ---- HELPERS ----
+def search_products(query: str) -> list[dict]:
+    # единая точка: sources.py
     return fetch_offers(query)
 
 
+def _is_valid_offer(offer: dict) -> bool:
+    """
+    Отсекаем "ошибки источников", чтобы они:
+    - не показывались в списке
+    - не выбирались номером
+    """
+    if not isinstance(offer, dict):
+        return False
+
+    url = str(offer.get("url", "") or "")
+    if url == "about:blank" or not url.startswith(("http://", "https://")):
+        return False
+
+    try:
+        price = int(offer.get("price", 10**18))
+    except Exception:
+        return False
+
+    # 10**18 ты использовал как "ошибка", отсекаем всё подозрительно огромное
+    if price >= 10**17:
+        return False
+
+    title = str(offer.get("title", "") or "").strip()
+    if not title:
+        return False
+
+    return True
+
+
+def _normalize_offers(items: list[dict]) -> list[dict]:
+    """
+    Приводим офферы к единому виду и фильтруем мусор.
+    """
+    out: list[dict] = []
+    for it in items or []:
+        if not _is_valid_offer(it):
+            continue
+        # гарантируем поля
+        out.append(
+            {
+                "title": str(it.get("title")),
+                "price": int(it.get("price")),
+                "url": str(it.get("url")),
+                "source": str(it.get("source", "unknown")),
+            }
+        )
+    return out
+
+
 def get_best_offer(query: str) -> dict | None:
-    items = search_products(query)
+    items = _normalize_offers(search_products(query))
     if not items:
         return None
     return min(items, key=lambda x: int(x.get("price", 10**18)))
@@ -109,7 +157,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     low = text.lower()
     user_id = update.effective_user.id
 
-    # выбор по номеру
+    # выбор по номеру (после "найди")
     if text.isdigit():
         items = context.user_data.get("last_items")
         if not items:
@@ -123,7 +171,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         item = items[idx]
         await update.message.reply_text(
-            f"Выбрано: {item['title']}\n"
+            f"Выбрано: [{item.get('source','unknown')}] {item['title']}\n"
             f"Цена: {item['price']} ₽\n"
             f"Ссылка: {item['url']}"
         )
@@ -136,16 +184,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Напиши так: найди iPhone 15")
             return
 
-        items = search_products(query)
+        items = _normalize_offers(search_products(query))
         if not items:
-            await update.message.reply_text("Ничего не нашёл.")
+            await update.message.reply_text("Ничего не нашёл (или источники временно недоступны).")
             return
 
         context.user_data["last_items"] = items
 
         msg = "Нашёл:\n\n"
         for i, item in enumerate(items[:10], start=1):
-            msg += f"{i}. {item['title']} — {item['price']} ₽\n"
+            msg += f"{i}. [{item.get('source','unknown')}] {item['title']} — {item['price']} ₽\n"
         msg += "\nНапиши номер, чтобы выбрать."
         await update.message.reply_text(msg)
         return
@@ -165,7 +213,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         notified.discard((user_id, query.lower(), limit))
 
         await update.message.reply_text(
-            f"Добавил отслеживание ✅\n"
+            "Добавил отслеживание ✅\n"
             f"Товар: {query}\n"
             f"Лимит: {limit} ₽\n"
             f"Проверяю каждые {CHECK_INTERVAL} сек.\n"
@@ -202,6 +250,7 @@ async def checker_loop():
                             text=(
                                 "🔥 Цена ниже лимита!\n"
                                 f"Товар: {query}\n"
+                                f"Источник: {best.get('source','unknown')}\n"
                                 f"Найдено: {best['title']}\n"
                                 f"Цена: {price} ₽ (лимит {limit} ₽)\n"
                                 f"Ссылка: {best['url']}"
